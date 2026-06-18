@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Test / generated output
+test_log_extractor.log
+test_run_environment/
+sample_data/
+test_data/
+sample_a/
+sample_b/
+sample_c/
+*_filtered/
+*_filtered_*/
+
+# Local test folders
+demo_local_mode/
+data/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Config user data (keep structure, ignore local overrides)
+# Uncomment the line below if you don't want to track config changes:
+# config.yml
