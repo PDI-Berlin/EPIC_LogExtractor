@@ -12,6 +12,7 @@ __pycache__/
 
 # Test / generated output
 test_log_extractor.log
+test_log_extractor.py
 test_run_environment/
 sample_data/
 test_data/
@@ -21,14 +22,17 @@ sample_c/
 *_filtered/
 *_filtered_*/
 
-# Local test folders
+# Local test folders and scripts
 demo_local_mode/
+demo_local_only.py
 data/
+
+# Reference projects (not part of this tool)
+nomad_uploader_script/
+
+# Config (local user settings, not shared)
+config.yml
 
 # Windows
 Thumbs.db
 Desktop.ini
-
-# Config user data (keep structure, ignore local overrides)
-# Uncomment the line below if you don't want to track config changes:
-# config.yml
