@@ -18,7 +18,7 @@ _TS_FORMATS = (
 
 # ── Dated-folder name patterns  (group names: y, m, d) ────────────────────
 _DATE_FOLDER_PATTERNS = [
-    re.compile(r"^(?P<y>\d{4})[-_](?P<m>\d{2})[-_](?P<d>\d{2})$"),   # 2026-03-13
+    re.compile(r"^(?P<y>\d{4})[-_](?P<m>\d{2})[-_](?P<d>\d{2})$"),   # 2026-03-13 or 2026_03_13
     re.compile(r"^(?P<d>\d{2})[-_](?P<m>\d{2})[-_](?P<y>\d{4})$"),   # 13-03-2026
 ]
 
@@ -33,7 +33,6 @@ RE_EXIT_GC = re.compile(
 )
 
 # ── Non-numeric / annotation files: never inject artificial rows ───────────
-# This list is a first-pass; the script also auto-detects by value content.
 _SKIP_INJECT_NAMES = {
     "messages.txt",
     "shutters.txt",
@@ -622,6 +621,10 @@ def process_visit(
             pass
 
     for filename in sorted(all_filenames):
+        # Skip Messages.txt — it's used for GC event detection only, not data output
+        if filename.lower() == "messages.txt":
+            continue
+
         dest_file = epic_dir / filename
         label = f"     {filename:45s}"
 
@@ -673,18 +676,25 @@ def main() -> None:
                 cfg = yaml.safe_load(fh) or {}
         except Exception:
             pass
-    aux_paths = []
-    for p in cfg.get("auxiliary_files", []):
-        resolved = (_CONFIG_PATH.parent / p).resolve()
-        if resolved.exists():
-            aux_paths.append(resolved)
+
+    # ── Resolve auxiliary folder ──────────────────────────────────────────
+    # Config has a single folder path; we copy ALL files from it.
+    aux_folder: Path | None = None
+    aux_cfg = cfg.get("auxiliary_files", [])
+    if aux_cfg:
+        p = Path(aux_cfg[0])
+        if not p.is_absolute():
+            p = (_CONFIG_PATH.parent / p).resolve()
+        if p.is_dir():
+            aux_folder = p
+        elif p.is_file():
+            # Backward compat: if a file was given, use its parent folder
+            aux_folder = p.parent
 
     # ── Resolve log folder path ─────────────────────────────────────────
     if len(sys.argv) >= 2:
-        # Path given on command line — use it directly
         base_dir = Path(sys.argv[1]).resolve()
     else:
-        # No path given — try config, then ask interactively
         cfg_path = cfg.get("log_path", "")
         if cfg_path:
             p = Path(cfg_path)
@@ -724,51 +734,40 @@ def main() -> None:
         output_base = base_dir.parent
     print(f"Output in  : {output_base}")
 
-    # Discover dated sibling folders for cross-day merging
+    # ── Discover dated sibling folders (for cross-day data collection) ───
     dated_siblings = find_dated_siblings(base_dir)
-    if dated_siblings:
-        print(f"\nDated sibling folders found ({len(dated_siblings)}):")
-        for d, p in sorted(dated_siblings.items()):
-            marker = "  ← base" if p == base_dir else ""
-            print(f"    {d}  →  {p.name}{marker}")
-    else:
-        print("\nNo dated sibling folders found — single-folder mode.")
 
-    # Parse GC events from Messages.txt across ALL dated sibling folders
+    # ── Parse Messages.txt from the TARGET folder ONLY ───────────────────
     print("\nParsing Messages.txt ...")
-    messages_sources = []
-    if dated_siblings:
-        for d in sorted(dated_siblings):
-            mf = dated_siblings[d] / "Messages.txt"
-            if mf.is_file():
-                messages_sources.append(mf)
-    # Always include base_dir Messages.txt if not already covered
-    base_msg = base_dir / "Messages.txt"
-    if base_msg not in messages_sources:
-        if base_msg.is_file():
-            messages_sources.insert(0, base_msg)
-
-    if not messages_sources:
-        print(
-            f"\nWARNING: Messages.txt not found in:\n  {base_dir}\n"
-            f"Cannot determine GC timeframes without it. Exiting."
-        )
+    mf = base_dir / "Messages.txt"
+    if not mf.is_file():
+        print(f"\nERROR: Messages.txt not found in: {base_dir}")
         sys.exit(1)
+
+    messages_sources = [mf]
+    print(f"  Using Messages.txt from: {base_dir}")
 
     all_events: list[dict] = []
     seen_events: set[tuple] = set()
-    for mf in messages_sources:
-        for ev in parse_messages(mf):
+    for msg_file in messages_sources:
+        for ev in parse_messages(msg_file):
             key = (ev["sample"], ev["direction"], ev["timestamp"])
             if key not in seen_events:
                 seen_events.add(key)
                 all_events.append(ev)
     all_events.sort(key=lambda e: e["timestamp"])
     events = all_events
-    print(f"  {len(events)} GC move event(s) found across "
-          f"{len(messages_sources)} Messages.txt file(s).")
+    print(f"  {len(events)} GC move event(s) found.")
 
-    # Build visits
+    # ── Show auxiliary folder info ────────────────────────────────────────
+    if aux_folder:
+        aux_files = [f for f in aux_folder.iterdir() if f.is_file()]
+        print(f"\nAuxiliary folder: {aux_folder}")
+        print(f"  {len(aux_files)} file(s) will be copied to each output folder")
+    else:
+        print(f"\nNo auxiliary folder configured")
+
+    # ── Build visits ─────────────────────────────────────────────────────
     visits, warnings = build_sample_visits(events)
     for w in warnings:
         print(f"\n  {w}")
@@ -787,24 +786,26 @@ def main() -> None:
             f"{v['end'].strftime('%d/%m/%Y %H:%M:%S')}{cross}"
         )
 
-    # Process each visit
+    # ── Process each visit ───────────────────────────────────────────────
     print("\nProcessing ...")
     built_folders = []
     for visit in visits:
         result = process_visit(visit, base_dir, dated_siblings, output_base)
-        # Copy auxiliary files alongside EPIC_logs/
-        for src in aux_paths:
-            try:
-                shutil.copy2(src, result / src.name)
-            except Exception:
-                pass
+        # Copy ALL auxiliary files from the configured folder into EPIC_logs/
+        if aux_folder and aux_folder.is_dir():
+            for src in aux_folder.iterdir():
+                if src.is_file():
+                    try:
+                        shutil.copy2(src, result / "EPIC_logs" / src.name)
+                    except Exception:
+                        pass
         built_folders.append(result)
 
     print("\n" + "=" * 60)
     print(f"Done.  {len(visits)} folder(s) created in: {output_base}")
     print("=" * 60)
 
-    # Optional NOMAD upload — authenticate once, reuse for all folders
+    # Optional NOMAD upload
     if not built_folders:
         return
 

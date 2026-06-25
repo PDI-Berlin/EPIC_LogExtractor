@@ -151,7 +151,7 @@ def create_zip(source_folder):
         for root, _dirs, files in os.walk(source_folder):
             for file in files:
                 full_path = os.path.join(root, file)
-                arcname = os.path.relpath(full_path, source_folder.parent)
+                arcname = os.path.relpath(full_path, source_folder)
                 zipf.write(full_path, arcname=arcname)
 
     return zip_path

@@ -16,19 +16,20 @@ python log_extractor.py
 
 ## How it works
 
-1. Parses `Messages.txt` for GC move events across dated sibling folders.
+1. Parses `Messages.txt` for GC move events in the target folder.
 2. Pairs entry/exit events into visits, handling **implicit swaps** (when a
    new sample displaces the current GC occupant without a logged exit).
 3. For each visit, creates an output folder with time-filtered EPIC log files
-   under `EPIC_logs/`, plus any configured auxiliary files.
+   under `EPIC_logs/` (excluding `Messages.txt`), plus all files from the
+   configured auxiliary folder.
 4. Optionally zips and uploads each folder to a NOMAD Oasis.
 
 ## Output structure
 
 ```
 <growth_run_id>/
-    EPIC_logs/          ← filtered EPIC log files
-    (auxiliary files)   ← copied from config.yml
+    EPIC_logs/          ← filtered EPIC log files (Messages.txt excluded)
+    (auxiliary files)   ← all files from the configured auxiliary folder
 ```
 
 ## Configuration
@@ -39,7 +40,7 @@ All settings live in `config.yml` (next to the script):
 |---------|-------------|
 | `log_path` | Default log folder when no path is given on the command line. Leave empty to be prompted. |
 | `output.base_path` | Where to write growth-run folders. Leave empty for default (log folder's parent). |
-| `auxiliary_files` | List of file paths to copy into each growth-run folder. |
+| `auxiliary_files` | A single folder path — all files inside it are copied into each growth-run folder's `EPIC_logs/` directory. |
 | `nomad.servers` | Per-user NOMAD server URLs and upload IDs (saved across sessions). |
 
 ## NOMAD upload
@@ -70,7 +71,7 @@ Warnings are shown for:
 
 ## Features
 
-- Cross-day extraction (merges from adjacent dated folders)
+- Cross-day extraction (merges EPIC logs from adjacent dated folders)
 - Automatic dated-folder discovery
 - Implicit GC swap detection
 - Artificial boundary rows for numeric logs
@@ -78,6 +79,7 @@ Warnings are shown for:
 - Locked-file handling
 - Output folder collision handling (`_filtered`, `_filtered_2`, ...)
 - NOMAD upload with single-login for multiple folders
+- Messages.txt excluded from output (used only for GC event detection)
 
 ## Requirements
 
