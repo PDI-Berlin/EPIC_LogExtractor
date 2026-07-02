@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import sys
@@ -167,11 +168,7 @@ def folders_for_span(
     for d in needed_dates:
         if d in dated_siblings:
             result.append(dated_siblings[d])
-        else:
-            # Date needed but folder absent – warn at call site
-            pass
 
-    # Deduplicate while preserving order
     seen = set()
     unique = []
     for p in result:
@@ -244,10 +241,8 @@ def build_sample_visits(events: list[dict]) -> tuple[list[dict], list[str]]:
     visits: list[dict] = []
     warnings: list[str] = []
 
-    # Per-sample visit counter for unique folder naming
     visit_counter: dict[str, int] = defaultdict(int)
 
-    # Current GC occupant: {"sample": ..., "start": ...} or None
     occupant = None
 
     for ev in events:
@@ -256,7 +251,6 @@ def build_sample_visits(events: list[dict]) -> tuple[list[dict], list[str]]:
 
         if ev["direction"] == "enter":
             if occupant is not None and occupant["sample"] != sample:
-                # Implicit swap: close previous occupant's visit
                 visit_counter[occupant["sample"]] += 1
                 vn = visit_counter[occupant["sample"]]
                 folder = (
@@ -275,7 +269,6 @@ def build_sample_visits(events: list[dict]) -> tuple[list[dict], list[str]]:
                     f"{format_ts(ts)} (displaced by {sample})"
                 )
 
-            # Start visit for the new entrant
             occupant = {"sample": sample, "start": ts}
 
         elif ev["direction"] == "exit":
@@ -302,7 +295,6 @@ def build_sample_visits(events: list[dict]) -> tuple[list[dict], list[str]]:
             })
             occupant = None
 
-    # End-of-log: sample still in GC
     if occupant is not None:
         warnings.append(
             f"WARNING: '{occupant['sample']}' entered GC at "
@@ -374,12 +366,12 @@ def read_header_bytes(file_path: Path) -> list[bytes]:
             for raw in fh:
                 line = decode_line(raw).strip()
                 if not line:
-                    headers.append(raw)   # preserve blank lines in header
+                    headers.append(raw)
                     continue
                 if is_header_line(line):
                     headers.append(raw)
                 else:
-                    break                 # first data row reached
+                    break
     except OSError:
         pass
     return headers
@@ -418,10 +410,6 @@ def collect_rows_across_folders(
     return header_bytes, all_rows
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ARTIFICIAL BOUNDARY ROW LOGIC
-# ═══════════════════════════════════════════════════════════════════════════
-
 def values_from_row(raw: bytes) -> bytes | None:
     """
     Extract everything after the first comma in a data row as raw bytes.
@@ -431,7 +419,6 @@ def values_from_row(raw: bytes) -> bytes | None:
     idx = decoded.find(",")
     if idx == -1:
         return None
-    # Preserve original line ending from raw
     ending = b"\r\n" if raw.endswith(b"\r\n") else b"\n"
     return decoded[idx:].encode("utf-8") + ending
 
@@ -439,7 +426,7 @@ def values_from_row(raw: bytes) -> bytes | None:
 def is_numeric_values(raw: bytes) -> bool:
     """
     Return True if every value field (after the timestamp) in a data row
-    contains only numeric data.  Used to auto-detect injection eligibility.
+    contains only numeric data.
     """
     decoded = decode_line(raw).strip()
     parts = decoded.split(",")
@@ -479,13 +466,8 @@ def make_artificial_row(ts: datetime, value_bytes: bytes) -> bytes:
     Preserves the original line ending from value_bytes.
     """
     ts_str = format_ts(ts).encode("utf-8")
-    # value_bytes already starts with "," and ends with line terminator
     return ts_str + value_bytes
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CORE FILE PROCESSING
-# ═══════════════════════════════════════════════════════════════════════════
 
 def process_timestamped_file(
     filename: str,
@@ -505,7 +487,6 @@ def process_timestamped_file(
     if not header_bytes and not all_rows:
         return 0, 0
 
-    # ── Split rows into: before-window, in-window, after-window ──────────
     before: list[tuple[datetime, bytes]] = []
     window: list[tuple[datetime, bytes]] = []
 
@@ -514,36 +495,23 @@ def process_timestamped_file(
             before.append((ts, raw))
         elif ts <= end:
             window.append((ts, raw))
-        # rows after end are discarded
-
-    # ── Determine artificial row eligibility ─────────────────────────────
-    inject = should_inject(filename, window)
-
-    # No in-window rows → write header only, no artificial rows
-    if not window and not inject:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "wb") as fh:
-            for hb in header_bytes:
-                fh.write(hb)
-        return 0, 0
 
     art_start_raw: bytes | None = None
     art_end_raw:   bytes | None = None
 
+    inject = should_inject(filename, window)
+
     if inject:
-        # Artificial start row: values from last row BEFORE start time
         if before:
             val = values_from_row(before[-1][1])
             if val is not None:
                 art_start_raw = make_artificial_row(start, val)
 
-        # Artificial end row: values from last in-window row
         if window:
             val = values_from_row(window[-1][1])
             if val is not None:
                 art_end_raw = make_artificial_row(end, val)
 
-    # ── Write output file ─────────────────────────────────────────────────
     dest.parent.mkdir(parents=True, exist_ok=True)
     art_count = 0
 
@@ -565,10 +533,6 @@ def process_timestamped_file(
     return len(window), art_count
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# PER-VISIT ORCHESTRATION
-# ═══════════════════════════════════════════════════════════════════════════
-
 def process_visit(
     visit: dict,
     base_dir: Path,
@@ -577,6 +541,7 @@ def process_visit(
 ) -> Path:
     """
     Create the output folder for one sample visit and populate it.
+
     EPIC log files go into an EPIC_logs/ subdirectory.
     Returns the growth-run folder path.
     """
@@ -592,7 +557,6 @@ def process_visit(
         f"  ({start.strftime('%d/%m/%Y %H:%M:%S')} – {end.strftime('%d/%m/%Y %H:%M:%S')})"
     )
 
-    # Determine which source folders cover the date span
     source_folders = folders_for_span(start, end, base_dir, dated_siblings)
 
     if len(source_folders) > 1:
@@ -610,7 +574,6 @@ def process_visit(
             print(f"     WARNING: no dated folder found for: {', '.join(missing)}"
                   f" — using available data only.")
 
-    # Collect the union of all filenames across all source folders
     all_filenames: set[str] = set()
     for folder in source_folders:
         try:
@@ -621,14 +584,9 @@ def process_visit(
             pass
 
     for filename in sorted(all_filenames):
-        # Skip Messages.txt — it's used for GC event detection only, not data output
-        if filename.lower() == "messages.txt":
-            continue
-
         dest_file = epic_dir / filename
         label = f"     {filename:45s}"
 
-        # Find an accessible copy to check readability and type
         src_example = next(
             (folder / filename for folder in source_folders
              if (folder / filename).is_file()),
@@ -650,7 +608,6 @@ def process_visit(
                 art_note = f" + {art_rows} artificial" if art_rows else ""
                 print(f"{label}  filtered   ({data_rows} rows{art_note})")
             else:
-                # Non-timestamped: copy the first available source as-is
                 shutil.copy2(src_example, dest_file)
                 print(f"{label}  copied as-is (no timestamp data)")
 
@@ -677,19 +634,17 @@ def main() -> None:
         except Exception:
             pass
 
-    # ── Resolve auxiliary folder ──────────────────────────────────────────
-    # Config has a single folder path; we copy ALL files from it.
-    aux_folder: Path | None = None
+    # ── Resolve auxiliary file/folder paths ────────────────────────────────
+    # Each entry can be a file (copy directly) or a folder (create folder in
+    # target and copy all contents into it).
+    aux_items: list[Path] = []
     aux_cfg = cfg.get("auxiliary_files", [])
     if aux_cfg:
-        p = Path(aux_cfg[0])
-        if not p.is_absolute():
-            p = (_CONFIG_PATH.parent / p).resolve()
-        if p.is_dir():
-            aux_folder = p
-        elif p.is_file():
-            # Backward compat: if a file was given, use its parent folder
-            aux_folder = p.parent
+        for item in aux_cfg:
+            p = Path(item)
+            if not p.is_absolute():
+                p = (_CONFIG_PATH.parent / p).resolve()
+            aux_items.append(p)
 
     # ── Resolve log folder path ─────────────────────────────────────────
     if len(sys.argv) >= 2:
@@ -734,18 +689,32 @@ def main() -> None:
         output_base = base_dir.parent
     print(f"Output in  : {output_base}")
 
-    # ── Discover dated sibling folders (for cross-day data collection) ───
+    # Discover dated sibling folders for cross-day support
     dated_siblings = find_dated_siblings(base_dir)
+    if dated_siblings:
+        print(f"\nDated sibling folders found ({len(dated_siblings)}):")
+        for d, p in sorted(dated_siblings.items()):
+            marker = "  ← base" if p == base_dir else ""
+            print(f"    {d}  →  {p.name}{marker}")
+    else:
+        print("\nNo dated sibling folders found — single-folder mode.")
 
-    # ── Parse Messages.txt from the TARGET folder ONLY ───────────────────
+    # Parse Messages.txt across all dated sibling folders for cross-day events
     print("\nParsing Messages.txt ...")
-    mf = base_dir / "Messages.txt"
-    if not mf.is_file():
+    messages_sources = []
+    if dated_siblings:
+        for d in sorted(dated_siblings):
+            mf = dated_siblings[d] / "Messages.txt"
+            if mf.is_file():
+                messages_sources.append(mf)
+    base_msg = base_dir / "Messages.txt"
+    if base_msg not in messages_sources:
+        if base_msg.is_file():
+            messages_sources.insert(0, base_msg)
+
+    if not messages_sources:
         print(f"\nERROR: Messages.txt not found in: {base_dir}")
         sys.exit(1)
-
-    messages_sources = [mf]
-    print(f"  Using Messages.txt from: {base_dir}")
 
     all_events: list[dict] = []
     seen_events: set[tuple] = set()
@@ -757,15 +726,20 @@ def main() -> None:
                 all_events.append(ev)
     all_events.sort(key=lambda e: e["timestamp"])
     events = all_events
-    print(f"  {len(events)} GC move event(s) found.")
+    print(f"  {len(events)} GC move event(s) found across "
+          f"{len(messages_sources)} Messages.txt file(s).")
 
-    # ── Show auxiliary folder info ────────────────────────────────────────
-    if aux_folder:
-        aux_files = [f for f in aux_folder.iterdir() if f.is_file()]
-        print(f"\nAuxiliary folder: {aux_folder}")
-        print(f"  {len(aux_files)} file(s) will be copied to each output folder")
+    # ── Show auxiliary items info ─────────────────────────────────────────
+    if aux_items:
+        files = [p for p in aux_items if p.is_file()]
+        dirs = [p for p in aux_items if p.is_dir()]
+        print(f"\nAuxiliary items: {len(aux_items)}")
+        if files:
+            print(f"  {len(files)} file(s) — copied directly into target folder")
+        if dirs:
+            print(f"  {len(dirs)} folder(s) — folder created in target, contents copied")
     else:
-        print(f"\nNo auxiliary folder configured")
+        print(f"\nNo auxiliary items configured")
 
     # ── Build visits ─────────────────────────────────────────────────────
     visits, warnings = build_sample_visits(events)
@@ -791,21 +765,28 @@ def main() -> None:
     built_folders = []
     for visit in visits:
         result = process_visit(visit, base_dir, dated_siblings, output_base)
-        # Copy ALL auxiliary files from the configured folder into EPIC_logs/
-        if aux_folder and aux_folder.is_dir():
-            for src in aux_folder.iterdir():
-                if src.is_file():
-                    try:
-                        shutil.copy2(src, result / "EPIC_logs" / src.name)
-                    except Exception:
-                        pass
+        # Copy auxiliary items alongside EPIC_logs/
+        for item in aux_items:
+            if item.is_file():
+                try:
+                    shutil.copy2(item, result / item.name)
+                except Exception:
+                    pass
+            elif item.is_dir():
+                sub = result / item.name
+                sub.mkdir(parents=True, exist_ok=True)
+                for f in item.iterdir():
+                    if f.is_file():
+                        try:
+                            shutil.copy2(f, sub / f.name)
+                        except Exception:
+                            pass
         built_folders.append(result)
 
     print("\n" + "=" * 60)
     print(f"Done.  {len(visits)} folder(s) created in: {output_base}")
     print("=" * 60)
 
-    # Optional NOMAD upload
     if not built_folders:
         return
 
