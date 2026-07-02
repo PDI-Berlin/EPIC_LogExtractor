@@ -699,22 +699,14 @@ def main() -> None:
     else:
         print("\nNo dated sibling folders found — single-folder mode.")
 
-    # Parse Messages.txt across all dated sibling folders for cross-day events
+    # Parse Messages.txt — only from the given folder (not dated siblings).
+    # Cross-day data rows are still pulled from sibling folders in process_visit.
     print("\nParsing Messages.txt ...")
-    messages_sources = []
-    if dated_siblings:
-        for d in sorted(dated_siblings):
-            mf = dated_siblings[d] / "Messages.txt"
-            if mf.is_file():
-                messages_sources.append(mf)
-    base_msg = base_dir / "Messages.txt"
-    if base_msg not in messages_sources:
-        if base_msg.is_file():
-            messages_sources.insert(0, base_msg)
-
-    if not messages_sources:
+    mf = base_dir / "Messages.txt"
+    if not mf.is_file():
         print(f"\nERROR: Messages.txt not found in: {base_dir}")
         sys.exit(1)
+    messages_sources = [mf]
 
     all_events: list[dict] = []
     seen_events: set[tuple] = set()
@@ -726,8 +718,7 @@ def main() -> None:
                 all_events.append(ev)
     all_events.sort(key=lambda e: e["timestamp"])
     events = all_events
-    print(f"  {len(events)} GC move event(s) found across "
-          f"{len(messages_sources)} Messages.txt file(s).")
+    print(f"  {len(events)} GC move event(s) found.")
 
     # ── Show auxiliary items info ─────────────────────────────────────────
     if aux_items:
