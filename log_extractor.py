@@ -689,15 +689,8 @@ def main() -> None:
         output_base = base_dir.parent
     print(f"Output in  : {output_base}")
 
-    # Discover dated sibling folders for cross-day support
+    # Discover dated sibling folders for cross-day data row collection
     dated_siblings = find_dated_siblings(base_dir)
-    if dated_siblings:
-        print(f"\nDated sibling folders found ({len(dated_siblings)}):")
-        for d, p in sorted(dated_siblings.items()):
-            marker = "  ← base" if p == base_dir else ""
-            print(f"    {d}  →  {p.name}{marker}")
-    else:
-        print("\nNo dated sibling folders found — single-folder mode.")
 
     # Parse Messages.txt — only from the given folder (not dated siblings).
     # Cross-day data rows are still pulled from sibling folders in process_visit.
