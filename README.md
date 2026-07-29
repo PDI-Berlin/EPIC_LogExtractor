@@ -16,20 +16,25 @@ python log_extractor.py
 
 ## How it works
 
-1. Parses `Messages.txt` for GC move events in the target folder.
+1. Parses `Messages.txt` for GC move events in the target folder. If a
+   sample is still in GC at the end of that day's log (no exit, no
+   displacing entry), the single event that resolves it is pulled from a
+   later dated sibling folder — the rest of that sibling's `Messages.txt`
+   is not read.
 2. Pairs entry/exit events into visits, handling **implicit swaps** (when a
    new sample displaces the current GC occupant without a logged exit).
 3. For each visit, creates an output folder with time-filtered EPIC log files
-   under `EPIC_logs/` (excluding `Messages.txt`), plus all files from the
-   configured auxiliary folder.
+   (including `Messages.txt`) under `EPIC_logs/`, plus the configured
+   auxiliary files/folders copied into the growth-run folder itself.
 4. Optionally zips and uploads each folder to a NOMAD Oasis.
 
 ## Output structure
 
 ```
 <growth_run_id>/
-    EPIC_logs/          ← filtered EPIC log files (Messages.txt excluded)
-    (auxiliary files)   ← all files from the configured auxiliary folder
+    EPIC_logs/          ← filtered EPIC log files, including Messages.txt
+    (auxiliary files)   ← files copied directly; folders created and
+                           populated with their contents
 ```
 
 ## Configuration
@@ -40,7 +45,7 @@ All settings live in `config.yml` (next to the script):
 |---------|-------------|
 | `log_path` | Default log folder when no path is given on the command line. Leave empty to be prompted. |
 | `output.base_path` | Where to write growth-run folders. Leave empty for default (log folder's parent). |
-| `auxiliary_files` | A single folder path — all files inside it are copied into each growth-run folder's `EPIC_logs/` directory. |
+| `auxiliary_files` | List of file and/or folder paths. Each file is copied directly into every growth-run folder; each folder is created in the growth-run folder and populated with its contents. |
 | `nomad.servers` | Per-user NOMAD server URLs and upload IDs (saved across sessions). |
 
 ## NOMAD upload
@@ -74,12 +79,14 @@ Warnings are shown for:
 - Cross-day extraction (merges EPIC logs from adjacent dated folders)
 - Automatic dated-folder discovery
 - Implicit GC swap detection
+- Cross-day GC visit resolution (pulls in only the resolving event from a
+  later dated sibling when a visit isn't closed within the target day)
 - Artificial boundary rows for numeric logs
 - Non-timestamped files copied unchanged
 - Locked-file handling
 - Output folder collision handling (`_filtered`, `_filtered_2`, ...)
 - NOMAD upload with single-login for multiple folders
-- Messages.txt excluded from output (used only for GC event detection)
+- Auxiliary files/folders copied into each growth-run folder
 
 ## Requirements
 

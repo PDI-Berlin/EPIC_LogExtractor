@@ -306,6 +306,50 @@ def build_sample_visits(events: list[dict]) -> tuple[list[dict], list[str]]:
     return visits, warnings
 
 
+def find_trailing_occupant(events: list[dict]) -> dict | None:
+    """
+    Replay chronologically-sorted events, tracking the single GC occupant
+    (same rule as build_sample_visits), and return whoever is still in GC
+    — unresolved — at the end. None if the log ends with GC empty.
+    """
+    occupant = None
+    for ev in events:
+        if ev["direction"] == "enter":
+            occupant = {"sample": ev["sample"], "start": ev["timestamp"]}
+        elif ev["direction"] == "exit":
+            if occupant is not None:
+                occupant = None
+    return occupant
+
+
+def find_resolution_event(
+    occupant_sample: str,
+    after_date: date,
+    dated_siblings: dict[date, Path],
+) -> dict | None:
+    """
+    A sample left in GC at the end of the day's Messages.txt (no exit, no
+    displacing entry) means its visit continues into a later dated sibling
+    folder. Search those folders — strictly after `after_date`, in
+    chronological order — for the first event that resolves it: either its
+    own exit, or a new entry for a different sample (implicit swap).
+
+    Only that single resolving event is returned; the rest of the sibling
+    folder's Messages.txt is deliberately left unread.
+    """
+    for d in sorted(day for day in dated_siblings if day > after_date):
+        mf = dated_siblings[d] / "Messages.txt"
+        if not mf.is_file():
+            continue
+        day_events = sorted(parse_messages(mf), key=lambda e: e["timestamp"])
+        for ev in day_events:
+            if ev["direction"] == "exit" and ev["sample"] == occupant_sample:
+                return ev
+            if ev["direction"] == "enter" and ev["sample"] != occupant_sample:
+                return ev
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # OUTPUT FOLDER NAME RESOLUTION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -692,25 +736,45 @@ def main() -> None:
     # Discover dated sibling folders for cross-day data row collection
     dated_siblings = find_dated_siblings(base_dir)
 
-    # Parse Messages.txt — only from the given folder (not dated siblings).
-    # Cross-day data rows are still pulled from sibling folders in process_visit.
+    # Parse Messages.txt from the given folder only. If the day's log ends
+    # with a sample still in GC (no exit, no displacing entry), pull in just
+    # the single resolving event from a later dated sibling folder — not the
+    # whole sibling Messages.txt — via find_resolution_event().
     print("\nParsing Messages.txt ...")
     mf = base_dir / "Messages.txt"
     if not mf.is_file():
         print(f"\nERROR: Messages.txt not found in: {base_dir}")
         sys.exit(1)
-    messages_sources = [mf]
 
     all_events: list[dict] = []
     seen_events: set[tuple] = set()
-    for msg_file in messages_sources:
-        for ev in parse_messages(msg_file):
-            key = (ev["sample"], ev["direction"], ev["timestamp"])
-            if key not in seen_events:
-                seen_events.add(key)
-                all_events.append(ev)
+    for ev in parse_messages(mf):
+        key = (ev["sample"], ev["direction"], ev["timestamp"])
+        if key not in seen_events:
+            seen_events.add(key)
+            all_events.append(ev)
     all_events.sort(key=lambda e: e["timestamp"])
+
+    resolved_count = 0
+    pending = find_trailing_occupant(all_events)
+    while pending is not None:
+        resolution = find_resolution_event(
+            pending["sample"], pending["start"].date(), dated_siblings
+        )
+        if resolution is None:
+            break
+        key = (resolution["sample"], resolution["direction"], resolution["timestamp"])
+        if key in seen_events:
+            break
+        seen_events.add(key)
+        all_events.append(resolution)
+        all_events.sort(key=lambda e: e["timestamp"])
+        resolved_count += 1
+        pending = find_trailing_occupant(all_events)
+
     events = all_events
+    if resolved_count:
+        print(f"  Pulled {resolved_count} cross-day resolution event(s) from sibling folder(s).")
     print(f"  {len(events)} GC move event(s) found.")
 
     # ── Show auxiliary items info ─────────────────────────────────────────

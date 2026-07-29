@@ -32,7 +32,7 @@ nomad_uploader_script/
 
 # Config (local user settings, not shared)
 config.yml
-
+FIXES_EXPLANATION.md
 # Windows
 Thumbs.db
 Desktop.ini
