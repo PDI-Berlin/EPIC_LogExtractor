@@ -354,23 +354,32 @@ def find_resolution_event(
 # OUTPUT FOLDER NAME RESOLUTION
 # ═══════════════════════════════════════════════════════════════════════════
 
-def resolve_output_folder(output_base: Path, folder_name: str) -> Path:
+def resolve_output_folder(output_base: Path, folder_name: str) -> Path | None:
     """
-    Return a free path for the output folder.
-    Appends _filtered, _filtered_2, … if the name is already taken.
+    Return the output folder path for a growth run — always exactly
+    `folder_name`, never a renamed variant. NOMAD's epic_parser identifies
+    a growth run purely by this bare name (it derives the HDF5 output path
+    from the sample ID in Messages.txt, independent of the actual folder
+    name), so a silently-suffixed folder like "<name>_filtered" uploads to
+    NOMAD but fails to parse.
+
+    If the folder already exists, ask before overwriting it. Returns None
+    if the user declines — the caller should skip this visit.
     """
     candidate = output_base / folder_name
     if not candidate.exists():
         return candidate
-    candidate = output_base / f"{folder_name}_filtered"
-    if not candidate.exists():
+
+    print(f"\n  WARNING: output folder already exists: {candidate}")
+    print(f"  NOMAD identifies growth runs by this exact folder name — "
+          f"a renamed copy will upload but fail to parse.")
+    if yn_prompt(f"  Overwrite the existing '{folder_name}' folder?", "n"):
+        shutil.rmtree(candidate)
         return candidate
-    n = 2
-    while True:
-        candidate = output_base / f"{folder_name}_filtered_{n}"
-        if not candidate.exists():
-            return candidate
-        n += 1
+
+    print(f"  Skipping '{folder_name}' — remove or rename the existing "
+          f"folder yourself and re-run to include it.")
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -582,14 +591,17 @@ def process_visit(
     base_dir: Path,
     dated_siblings: dict[date, Path],
     output_base: Path,
-) -> Path:
+) -> Path | None:
     """
     Create the output folder for one sample visit and populate it.
 
     EPIC log files go into an EPIC_logs/ subdirectory.
-    Returns the growth-run folder path.
+    Returns the growth-run folder path, or None if the visit was skipped
+    (existing output folder, user declined to overwrite).
     """
     dest_dir = resolve_output_folder(output_base, visit["folder_name"])
+    if dest_dir is None:
+        return None
     epic_dir = dest_dir / "EPIC_logs"
     epic_dir.mkdir(parents=True, exist_ok=True)
 
@@ -813,6 +825,8 @@ def main() -> None:
     built_folders = []
     for visit in visits:
         result = process_visit(visit, base_dir, dated_siblings, output_base)
+        if result is None:
+            continue
         # Copy auxiliary items into EPIC_logs/
         epic_dir = result / "EPIC_logs"
         for item in aux_items:
@@ -832,8 +846,10 @@ def main() -> None:
                             pass
         built_folders.append(result)
 
+    skipped = len(visits) - len(built_folders)
+    skip_note = f"  ({skipped} skipped)" if skipped else ""
     print("\n" + "=" * 60)
-    print(f"Done.  {len(visits)} folder(s) created in: {output_base}")
+    print(f"Done.  {len(built_folders)} folder(s) created in: {output_base}{skip_note}")
     print("=" * 60)
 
     if not built_folders:

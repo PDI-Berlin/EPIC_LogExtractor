@@ -75,6 +75,26 @@ Warnings are shown for:
 - Exits with no current GC occupant
 - Samples still in GC at the end of the log (never displaced or exited)
 
+## Growth-run folder naming (important for NOMAD)
+
+NOMAD's `epic_parser` identifies a growth run purely by the sample ID it
+reads out of `Messages.txt` content — it derives the HDF5 output path from
+that ID alone, independent of the folder's actual name or nesting. So the
+output folder **must** be named exactly the sample ID (e.g. `m84326`) for
+NOMAD to ingest it; a renamed copy (e.g. `m84326_filtered`) will upload
+without error but fail during parsing.
+
+Because of this, if the target output folder already exists, the script no
+longer silently renames the new one — it warns and asks whether to
+overwrite. Declining skips that visit (existing folder left untouched);
+you'll need to remove or rename it yourself and re-run.
+
+**Known limitation:** if the same sample enters/exits GC more than once
+within one processing run, each visit still gets its own folder
+(`m84326`, `m84326_2`, ...) since they're genuinely distinct data — but
+NOMAD can only ever ingest the one named exactly `m84326`. Upload such
+visits one at a time, renaming to the bare sample ID before each upload.
+
 ## Features
 
 - Cross-day extraction (merges EPIC logs from adjacent dated folders)
@@ -85,7 +105,8 @@ Warnings are shown for:
 - Artificial boundary rows for numeric logs
 - Non-timestamped files copied unchanged
 - Locked-file handling
-- Output folder collision handling (`_filtered`, `_filtered_2`, ...)
+- Output folder collisions require explicit confirmation (never silently
+  renamed, since NOMAD requires the exact sample-ID folder name)
 - NOMAD upload with single-login for multiple folders
 - Auxiliary files/folders copied into each growth-run folder's `EPIC_logs/`
 
