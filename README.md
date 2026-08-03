@@ -24,17 +24,18 @@ python log_extractor.py
 2. Pairs entry/exit events into visits, handling **implicit swaps** (when a
    new sample displaces the current GC occupant without a logged exit).
 3. For each visit, creates an output folder with time-filtered EPIC log files
-   (including `Messages.txt`) under `EPIC_logs/`, plus the configured
-   auxiliary files/folders copied into the growth-run folder itself.
+   (including `Messages.txt`) plus the configured auxiliary files/folders,
+   all under `EPIC_logs/`.
 4. Optionally zips and uploads each folder to a NOMAD Oasis.
 
 ## Output structure
 
 ```
 <growth_run_id>/
-    EPIC_logs/          ← filtered EPIC log files, including Messages.txt
-    (auxiliary files)   ← files copied directly; folders created and
-                           populated with their contents
+    EPIC_logs/
+        (filtered EPIC log files, including Messages.txt)
+        (auxiliary files)   ← files copied directly; folders created and
+                               populated with their contents
 ```
 
 ## Configuration
@@ -45,7 +46,7 @@ All settings live in `config.yml` (next to the script):
 |---------|-------------|
 | `log_path` | Default log folder when no path is given on the command line. Leave empty to be prompted. |
 | `output.base_path` | Where to write growth-run folders. Leave empty for default (log folder's parent). |
-| `auxiliary_files` | List of file and/or folder paths. Each file is copied directly into every growth-run folder; each folder is created in the growth-run folder and populated with its contents. |
+| `auxiliary_files` | List of file and/or folder paths. Each file is copied directly into every growth-run folder's `EPIC_logs/`; each folder is created inside `EPIC_logs/` and populated with its contents. |
 | `nomad.servers` | Per-user NOMAD server URLs and upload IDs (saved across sessions). |
 
 ## NOMAD upload
@@ -86,7 +87,7 @@ Warnings are shown for:
 - Locked-file handling
 - Output folder collision handling (`_filtered`, `_filtered_2`, ...)
 - NOMAD upload with single-login for multiple folders
-- Auxiliary files/folders copied into each growth-run folder
+- Auxiliary files/folders copied into each growth-run folder's `EPIC_logs/`
 
 ## Requirements
 

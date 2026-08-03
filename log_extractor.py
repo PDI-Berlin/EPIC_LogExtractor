@@ -783,9 +783,9 @@ def main() -> None:
         dirs = [p for p in aux_items if p.is_dir()]
         print(f"\nAuxiliary items: {len(aux_items)}")
         if files:
-            print(f"  {len(files)} file(s) — copied directly into target folder")
+            print(f"  {len(files)} file(s) — copied directly into EPIC_logs/")
         if dirs:
-            print(f"  {len(dirs)} folder(s) — folder created in target, contents copied")
+            print(f"  {len(dirs)} folder(s) — folder created in EPIC_logs/, contents copied")
     else:
         print(f"\nNo auxiliary items configured")
 
@@ -813,15 +813,16 @@ def main() -> None:
     built_folders = []
     for visit in visits:
         result = process_visit(visit, base_dir, dated_siblings, output_base)
-        # Copy auxiliary items alongside EPIC_logs/
+        # Copy auxiliary items into EPIC_logs/
+        epic_dir = result / "EPIC_logs"
         for item in aux_items:
             if item.is_file():
                 try:
-                    shutil.copy2(item, result / item.name)
+                    shutil.copy2(item, epic_dir / item.name)
                 except Exception:
                     pass
             elif item.is_dir():
-                sub = result / item.name
+                sub = epic_dir / item.name
                 sub.mkdir(parents=True, exist_ok=True)
                 for f in item.iterdir():
                     if f.is_file():
